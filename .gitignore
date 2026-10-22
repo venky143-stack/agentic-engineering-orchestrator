@@ -1,0 +1,23 @@
+.venv/
+__pycache__/
+.pytest_cache/
+.coverage
+htmlcov/
+.env
+*.db
+.DS_Store
+
+# Generated agent outputs and local demo data
+generated/
+*.sqlite
+*.sqlite3
+
+# Python packaging/build artifacts
+*.egg-info/
+build/
+dist/
+
+# IDE and OS files
+.vscode/
+.idea/
+Thumbs.db
