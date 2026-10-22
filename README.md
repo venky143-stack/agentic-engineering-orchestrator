@@ -235,46 +235,6 @@ The exact artifact set depends on the selected scenario and successful execution
 
 These limitations are intentional and documented. A credible assessment should distinguish what is implemented from the production roadmap.
 
-## Publish as a public GitHub repository
-
-Create a **new, empty public repository** on GitHub named `agentic-engineering-orchestrator`. Do not initialize it with a README or license because this project already contains those files.
-
-Before committing, review the files and ensure you do not include `.env`, API keys, database files, credentials, customer data, production configuration, or virtual-environment files.
-
-Check the current Git state first:
-
-```bash
-git status --short
-git remote -v
-```
-
-If this folder is not already a Git repository, initialize it and stage the files:
-
-```bash
-git init
-git add .
-git status
-```
-
-Review the staged changes carefully before committing:
-
-```bash
-git diff --cached
-```
-
-Then commit and push:
-
-```bash
-git commit -m "Build review-first agentic engineering orchestrator prototype"
-git branch -M main
-git remote add origin https://github.com/YOUR_GITHUB_USERNAME/agentic-engineering-orchestrator.git
-git push -u origin main
-```
-
-Replace `YOUR_GITHUB_USERNAME` with your GitHub username. If a remote named `origin` already exists, inspect it with `git remote -v` instead of adding a duplicate.
-
-Finally, verify the public repository URL in a private/incognito browser window.
-
 ## License
 
 MIT. See `LICENSE`.
