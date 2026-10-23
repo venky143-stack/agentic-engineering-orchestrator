@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 
 import json
@@ -243,15 +244,18 @@ def _validate_source_tree() -> dict:
 
 
 def _run_generated_tests(output: Path) -> dict:
+    """Run only the generated service tests from the generated project."""
+    output = output.resolve()
     service_app = output / "service" / "app.py"
     test_file = output / "tests" / "test_service.py"
 
+    working_directory = str(output)
     command = [
         sys.executable,
         "-m",
         "pytest",
         "-q",
-        "tests",
+        "tests/test_service.py",
     ]
 
     if not service_app.is_file() or not test_file.is_file():
@@ -268,6 +272,7 @@ def _run_generated_tests(output: Path) -> dict:
             "skipped": True,
             "returncode": None,
             "command": command,
+            "working_directory": working_directory,
             "stdout": "",
             "stderr": "",
             "missing_inputs": missing,
@@ -280,7 +285,7 @@ def _run_generated_tests(output: Path) -> dict:
     try:
         result = subprocess.run(
             command,
-            cwd=str(output),
+            cwd=working_directory,
             capture_output=True,
             text=True,
             timeout=TEST_TIMEOUT_SECONDS,
@@ -292,6 +297,7 @@ def _run_generated_tests(output: Path) -> dict:
             "skipped": False,
             "returncode": result.returncode,
             "command": command,
+            "working_directory": working_directory,
             "stdout": result.stdout,
             "stderr": result.stderr,
             "timeout_seconds": TEST_TIMEOUT_SECONDS,
@@ -312,6 +318,7 @@ def _run_generated_tests(output: Path) -> dict:
             "skipped": False,
             "returncode": None,
             "command": command,
+            "working_directory": working_directory,
             "stdout": stdout,
             "stderr": stderr,
             "timeout_seconds": TEST_TIMEOUT_SECONDS,
@@ -327,8 +334,10 @@ def _run_generated_tests(output: Path) -> dict:
             "skipped": False,
             "returncode": None,
             "command": command,
+            "working_directory": working_directory,
             "stdout": "",
             "stderr": str(exc),
+            "timeout_seconds": TEST_TIMEOUT_SECONDS,
             "error": f"Could not start generated tests: {exc}",
         }
 
@@ -354,6 +363,14 @@ def _validate_outputs(output: Path) -> dict:
             "passed": False,
             "skipped": True,
             "returncode": None,
+            "command": [
+                sys.executable,
+                "-m",
+                "pytest",
+                "-q",
+                "tests/test_service.py",
+            ],
+            "working_directory": str(output.resolve()),
             "stdout": "",
             "stderr": "",
             "note": (
@@ -485,6 +502,10 @@ def _trace_markdown(report: dict) -> str:
             f"`{test_execution.get('passed', False)}`",
             f"- Generated test exit code: "
             f"`{test_execution.get('returncode')}`",
+            f"- Generated test working directory: "
+            f"`{test_execution.get('working_directory', 'not recorded')}`",
+            f"- Generated test command: "
+            f"`{' '.join(test_execution.get('command', []))}`",
         ]
     )
 
