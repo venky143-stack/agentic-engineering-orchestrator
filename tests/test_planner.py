@@ -326,3 +326,38 @@ def test_execute_recovers_after_failed_run():
     )
 
 
+def test_zero_retries_runs_failed_task_once_without_retry_event():
+    planner = DependencyPlanner(max_retries=0)
+    calls = {"requirements": 0}
+
+    def always_fails():
+        calls["requirements"] += 1
+        raise RuntimeError("failure with retries disabled")
+
+    handlers = _successful_handlers(planner)
+    handlers["requirements"] = always_fails
+
+    results, trace = planner.execute(handlers)
+
+    task = planner.tasks["requirements"]
+
+    assert "requirements" not in results
+    assert calls["requirements"] == 1
+    assert task.attempts == 1
+    assert task.status == "failed"
+    assert "failure with retries disabled" in task.error
+
+    assert not any(
+        event["event"] == "retry"
+        and event["task"] == "requirements"
+        for event in trace
+    )
+
+    assert any(
+        event["event"] == "failure"
+        and event["task"] == "requirements"
+        and event["attempt"] == 1
+        for event in trace
+    )
+
+
