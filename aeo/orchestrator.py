@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 
 import json
@@ -21,15 +22,73 @@ ROOT = Path(__file__).resolve().parents[1]
 TEST_TIMEOUT_SECONDS = 120
 
 
+def _is_within(path: Path, parent: Path) -> bool:
+    """Return True if path is parent itself or a descendant of parent."""
+    return path == parent or parent in path.parents
+
+
+def _artifact_target(output: Path, name: str) -> Path:
+    """Resolve an artifact path and reject destinations outside output."""
+    output = output.resolve()
+    target = (output / name).resolve()
+
+    if target == output or not _is_within(target, output):
+        raise ValueError(f"Unsafe artifact path: {name}")
+
+    return target
+
+
+def _validate_output_path(output: Path, repository: Path) -> None:
+    """Reject output paths that could overwrite repository source files."""
+    output = output.resolve()
+    repository = repository.resolve()
+    source_root = ROOT.resolve()
+
+    # Never allow output to replace or contain the repository itself.
+    if output == repository or _is_within(repository, output):
+        raise ValueError(
+            f"Unsafe output path: {output} would overwrite or contain "
+            "the repository."
+        )
+
+    # The orchestrator materializes implementation and test files from ROOT.
+    # Do not write into ROOT or any of its source directories.
+    if _is_within(output, source_root):
+        generated_root = (source_root / "generated").resolve()
+
+        # The only permitted output location inside ROOT is generated/.
+        if not _is_within(output, generated_root):
+            raise ValueError(
+                f"Unsafe output path: {output} must not overwrite "
+                "the source tree; use the generated/ directory."
+            )
+
+    # If the analyzed repository is different from ROOT, allow output inside
+    # it only beneath its generated/ directory.
+    if repository != source_root and _is_within(output, repository):
+        generated_root = (repository / "generated").resolve()
+
+        if not _is_within(output, generated_root):
+            raise ValueError(
+                f"Unsafe output path: {output} must be outside the "
+                "repository or inside its generated/ directory."
+            )
+
+
 def run_assessment(
     requirement_path: Path,
     output: Path,
     repository: Path | None = None,
     approve: bool = False,
 ) -> dict:
+    repository = (repository or ROOT).resolve()
+    output = output.resolve()
+
+    # Reject unsafe destinations before creating directories or writing files.
+    _validate_output_path(output, repository)
+
     requirement = requirement_path.read_text(encoding="utf-8")
     output.mkdir(parents=True, exist_ok=True)
-    repository = repository or ROOT
 
     agents = {
         "requirements": lambda: RequirementAnalyst().run(requirement),
@@ -53,7 +112,7 @@ def run_assessment(
     for task_id, result in results.items():
         if hasattr(result, "artifacts"):
             for name, content in result.artifacts.items():
-                target = output / name
+                target = _artifact_target(output, name)
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_text(content, encoding="utf-8")
                 artifacts[name] = str(target.relative_to(output))
@@ -62,7 +121,7 @@ def run_assessment(
             result, dict
         ):
             for name, source in result.items():
-                target = output / name
+                target = _artifact_target(output, name)
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(source, target)
                 artifacts[name] = str(target.relative_to(output))
@@ -185,15 +244,18 @@ def _validate_source_tree() -> dict:
 
 
 def _run_generated_tests(output: Path) -> dict:
+    """Run only the generated service tests from the generated project."""
+    output = output.resolve()
     service_app = output / "service" / "app.py"
     test_file = output / "tests" / "test_service.py"
 
+    working_directory = str(output)
     command = [
         sys.executable,
         "-m",
         "pytest",
         "-q",
-        "tests",
+        "tests/test_service.py",
     ]
 
     if not service_app.is_file() or not test_file.is_file():
@@ -210,6 +272,7 @@ def _run_generated_tests(output: Path) -> dict:
             "skipped": True,
             "returncode": None,
             "command": command,
+            "working_directory": working_directory,
             "stdout": "",
             "stderr": "",
             "missing_inputs": missing,
@@ -222,7 +285,7 @@ def _run_generated_tests(output: Path) -> dict:
     try:
         result = subprocess.run(
             command,
-            cwd=str(output),
+            cwd=working_directory,
             capture_output=True,
             text=True,
             timeout=TEST_TIMEOUT_SECONDS,
@@ -234,6 +297,7 @@ def _run_generated_tests(output: Path) -> dict:
             "skipped": False,
             "returncode": result.returncode,
             "command": command,
+            "working_directory": working_directory,
             "stdout": result.stdout,
             "stderr": result.stderr,
             "timeout_seconds": TEST_TIMEOUT_SECONDS,
@@ -254,6 +318,7 @@ def _run_generated_tests(output: Path) -> dict:
             "skipped": False,
             "returncode": None,
             "command": command,
+            "working_directory": working_directory,
             "stdout": stdout,
             "stderr": stderr,
             "timeout_seconds": TEST_TIMEOUT_SECONDS,
@@ -269,8 +334,10 @@ def _run_generated_tests(output: Path) -> dict:
             "skipped": False,
             "returncode": None,
             "command": command,
+            "working_directory": working_directory,
             "stdout": "",
             "stderr": str(exc),
+            "timeout_seconds": TEST_TIMEOUT_SECONDS,
             "error": f"Could not start generated tests: {exc}",
         }
 
@@ -296,6 +363,14 @@ def _validate_outputs(output: Path) -> dict:
             "passed": False,
             "skipped": True,
             "returncode": None,
+            "command": [
+                sys.executable,
+                "-m",
+                "pytest",
+                "-q",
+                "tests/test_service.py",
+            ],
+            "working_directory": str(output.resolve()),
             "stdout": "",
             "stderr": "",
             "note": (
@@ -427,6 +502,10 @@ def _trace_markdown(report: dict) -> str:
             f"`{test_execution.get('passed', False)}`",
             f"- Generated test exit code: "
             f"`{test_execution.get('returncode')}`",
+            f"- Generated test working directory: "
+            f"`{test_execution.get('working_directory', 'not recorded')}`",
+            f"- Generated test command: "
+            f"`{' '.join(test_execution.get('command', []))}`",
         ]
     )
 

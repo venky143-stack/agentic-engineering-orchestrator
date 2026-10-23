@@ -34,3 +34,19 @@ def test_unknown_code_returns_404(tmp_path, monkeypatch):
     _, client = make_client(tmp_path, monkeypatch)
     assert client.get("/missing-code").status_code == 404
     assert client.get("/api/urls/missing-code/analytics").status_code == 404
+
+def test_malformed_http_urls_rejected(tmp_path, monkeypatch):
+    _, client = make_client(tmp_path, monkeypatch)
+
+    invalid_urls = [
+        "http://",
+        "https://",
+        "https:///missing-host",
+        "https://example.com path",
+    ]
+
+    for url in invalid_urls:
+        response = client.post("/api/urls", json={"url": url})
+        assert response.status_code == 422, (
+            f"Expected malformed URL to be rejected: {url}"
+        )

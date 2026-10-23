@@ -570,11 +570,76 @@ flowchart LR
 - Define capacity targets and load-test before selecting cache, sharding, or multi-region design.
 - The generated prototype is not a claim of production scalability.
 """
+        lower = requirement.lower()
+        requests_deactivation = (
+            "deactivat" in lower
+            and ("url" in lower or "link" in lower)
+        )
+
+        if requests_deactivation:
+            content += """
+
+## Brownfield change plan: URL deactivation
+
+### Existing behavior and evidence
+- Inspect `service/app.py`, the actual URL schema, redirect handler,
+  analytics queries, OpenAPI contract, and existing tests before implementation.
+- Treat the existing implementation as authoritative. Do not assume that
+  the proposed schema or endpoint already exists.
+- Preserve existing redirect behavior for active URLs.
+
+### Proposed API contract
+- Add `POST /api/urls/{code}/deactivate`.
+- Successful deactivation: return a documented success response.
+- Unknown code: return HTTP 404.
+- Repeated deactivation: behave idempotently and return a documented response.
+- Deactivated redirect: return HTTP 410 Gone without redirecting.
+
+Confirm the response body and repeated-request status against the existing
+API conventions before finalizing the contract.
+
+### Persistence and compatibility
+- Prefer an `is_active` field on the existing URL record if source inspection
+  confirms that it fits the current schema and persistence model.
+- Existing URLs must remain active after migration.
+- Retain URL records and historical click events; do not delete them.
+- Check database initialization, existing database files, and migration
+  compatibility before relying on the new field.
+- Check concurrent redirect and deactivation requests.
+
+### Required regression tests
+- Active URLs retain existing redirect behavior.
+- Deactivated URLs return HTTP 410 and do not record new clicks.
+- Unknown codes return HTTP 404 for deactivation.
+- Repeated deactivation behaves predictably.
+- Historical analytics remain accessible after deactivation.
+- OpenAPI documents the endpoint and its responses.
+
+### Rollout, safety, and rollback
+- Propose a minimal, backward-compatible patch and migration plan.
+- Identify authorization and operational risks.
+- Define rollback steps without deleting URL or click-history data.
+- Do not modify application code, execute migrations, or deploy as part
+  of this analysis.
+
+**Implementation status:** proposed only; no application code or database
+has been changed by this architecture analysis.
+"""
+
         return AgentResult(
             self.name,
-            "Architecture and production risks documented.",
+            (
+                "Architecture, production risks, and requirement-specific "
+                "change plan documented."
+                if requests_deactivation
+                else "Architecture and production risks documented."
+            ),
             {"architecture.md": content},
-            {"review_required": True},
+            {
+                "review_required": True,
+                "requested_deactivation": requests_deactivation,
+                "proposal_only": requests_deactivation,
+            },
         )
 
 
