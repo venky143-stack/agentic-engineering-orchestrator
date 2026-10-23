@@ -21,15 +21,62 @@ ROOT = Path(__file__).resolve().parents[1]
 TEST_TIMEOUT_SECONDS = 120
 
 
+def _is_within(path: Path, parent: Path) -> bool:
+    """Return True if path is parent itself or a descendant of parent."""
+    return path == parent or parent in path.parents
+
+
+def _validate_output_path(output: Path, repository: Path) -> None:
+    """Reject output paths that could overwrite repository source files."""
+    output = output.resolve()
+    repository = repository.resolve()
+    source_root = ROOT.resolve()
+
+    # Never allow output to replace or contain the repository itself.
+    if output == repository or _is_within(repository, output):
+        raise ValueError(
+            f"Unsafe output path: {output} would overwrite or contain "
+            "the repository."
+        )
+
+    # The orchestrator materializes implementation and test files from ROOT.
+    # Do not write into ROOT or any of its source directories.
+    if _is_within(output, source_root):
+        generated_root = (source_root / "generated").resolve()
+
+        # The only permitted output location inside ROOT is generated/.
+        if not _is_within(output, generated_root):
+            raise ValueError(
+                f"Unsafe output path: {output} must not overwrite "
+                "the source tree; use the generated/ directory."
+            )
+
+    # If the analyzed repository is different from ROOT, allow output inside
+    # it only beneath its generated/ directory.
+    if repository != source_root and _is_within(output, repository):
+        generated_root = (repository / "generated").resolve()
+
+        if not _is_within(output, generated_root):
+            raise ValueError(
+                f"Unsafe output path: {output} must be outside the "
+                "repository or inside its generated/ directory."
+            )
+
+
 def run_assessment(
     requirement_path: Path,
     output: Path,
     repository: Path | None = None,
     approve: bool = False,
 ) -> dict:
+    repository = (repository or ROOT).resolve()
+    output = output.resolve()
+
+    # Reject unsafe destinations before creating directories or writing files.
+    _validate_output_path(output, repository)
+
     requirement = requirement_path.read_text(encoding="utf-8")
     output.mkdir(parents=True, exist_ok=True)
-    repository = repository or ROOT
 
     agents = {
         "requirements": lambda: RequirementAnalyst().run(requirement),

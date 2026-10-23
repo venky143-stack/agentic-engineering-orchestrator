@@ -190,3 +190,53 @@ def test_approval_metadata_is_explicit_and_never_authorizes_deployment(
     assert saved["status"] == "awaiting_human_review"
     assert saved["approval_requested"] is True
     assert saved["safety"] == safety
+
+
+def test_output_cannot_be_repository_root(tmp_path):
+    root = Path(__file__).resolve().parents[1]
+    requirement = root / "examples" / "url_shortener.md"
+
+    try:
+        run_assessment(requirement, root, root)
+    except ValueError as exc:
+        assert "output" in str(exc).lower()
+    else:
+        raise AssertionError("Expected repository-root output to be rejected")
+
+
+def test_output_cannot_be_source_subdirectory(tmp_path):
+    root = Path(__file__).resolve().parents[1]
+    requirement = root / "examples" / "url_shortener.md"
+    output = root / "service"
+
+    original_app = (output / "app.py").read_bytes()
+
+    try:
+        run_assessment(requirement, output, root)
+    except ValueError as exc:
+        assert "output" in str(exc).lower()
+    else:
+        raise AssertionError("Expected source-directory output to be rejected")
+
+    assert (output / "app.py").read_bytes() == original_app
+
+
+def test_output_outside_repository_is_allowed(tmp_path):
+    root = Path(__file__).resolve().parents[1]
+    requirement = root / "examples" / "url_shortener.md"
+    output = tmp_path / "review-bundle"
+
+    report = run_assessment(requirement, output, root)
+
+    assert report["status"] == "awaiting_human_review"
+    assert (output / "execution_report.json").is_file()
+
+def test_output_inside_generated_directory_is_allowed():
+    root = Path(__file__).resolve().parents[1]
+    requirement = root / "examples" / "url_shortener.md"
+    output = root / "generated" / "path-guard-test"
+
+    report = run_assessment(requirement, output, root)
+
+    assert report["status"] == "awaiting_human_review"
+    assert (output / "execution_report.json").is_file()
