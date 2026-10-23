@@ -282,3 +282,47 @@ def test_execute_can_be_reused_for_a_fresh_run():
         if event["event"] == "success"
     } == set(planner.tasks)
 
+def test_execute_recovers_after_failed_run():
+    planner = DependencyPlanner()
+    attempts = {}
+    fail_requirements = True
+
+    handlers = {}
+
+    for task_id in planner.tasks:
+        def handler(tid=task_id):
+            attempts[tid] = attempts.get(tid, 0) + 1
+
+            if tid == "requirements" and fail_requirements:
+                raise RuntimeError("simulated first-run failure")
+
+            return tid
+
+        handlers[task_id] = handler
+
+    first_results, first_trace = planner.execute(handlers)
+
+    assert "requirements" not in first_results
+    assert planner.tasks["requirements"].status == "failed"
+    assert any(
+        event["event"] == "blocked"
+        for event in first_trace
+    )
+
+    fail_requirements = False
+
+    second_results, second_trace = planner.execute(handlers)
+
+    assert set(second_results) == set(planner.tasks)
+    assert {
+        event["task"]
+        for event in second_trace
+        if event["event"] == "success"
+    } == set(planner.tasks)
+
+    assert all(
+        task.status == "success"
+        for task in planner.tasks.values()
+    )
+
+
