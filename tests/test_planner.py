@@ -252,3 +252,33 @@ def test_self_dependency_is_rejected_before_handlers_run():
         raise AssertionError("Expected self-dependency to be rejected")
 
     assert calls == []
+
+def test_execute_can_be_reused_for_a_fresh_run():
+    planner = DependencyPlanner()
+    calls = []
+
+    handlers = {
+        task_id: (lambda tid=task_id: calls.append(tid) or tid)
+        for task_id in planner.tasks
+    }
+
+    first_results, first_trace = planner.execute(handlers)
+
+    assert set(first_results) == set(planner.tasks)
+    assert len(calls) == len(planner.tasks)
+    assert {
+        event["task"]
+        for event in first_trace
+        if event["event"] == "success"
+    } == set(planner.tasks)
+
+    second_results, second_trace = planner.execute(handlers)
+
+    assert set(second_results) == set(planner.tasks)
+    assert len(calls) == 2 * len(planner.tasks)
+    assert {
+        event["task"]
+        for event in second_trace
+        if event["event"] == "success"
+    } == set(planner.tasks)
+

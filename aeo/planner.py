@@ -114,8 +114,15 @@ class DependencyPlanner:
                 f"Missing handlers for tasks: {', '.join(missing_handlers)}"
             )
 
-        # Validate the entire DAG before running any handler.
+        # Validate the entire DAG before changing state or running handlers.
         self._validate_graph()
+
+        # Reset runtime state so each execute() call is a fresh run.
+        for task in self.tasks.values():
+            task.status = "pending"
+            task.attempts = 0
+            task.error = None
+            task.duration_ms = None
 
         while any(
             task.status not in {"success", "failed", "blocked"}
