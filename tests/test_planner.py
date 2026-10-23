@@ -192,3 +192,63 @@ def test_negative_retry_count_is_rejected():
         assert "max_retries" in str(exc)
     else:
         raise AssertionError("Expected negative retries to raise ValueError")
+
+
+def test_dependency_cycle_is_rejected_before_handlers_run():
+    planner = DependencyPlanner()
+    planner.tasks["requirements"].dependencies = ["architecture"]
+
+    calls = []
+    handlers = {
+        task_id: (lambda tid=task_id: calls.append(tid))
+        for task_id in planner.tasks
+    }
+
+    try:
+        planner.execute(handlers)
+    except ValueError as exc:
+        assert "cycle" in str(exc).lower()
+    else:
+        raise AssertionError("Expected dependency cycle to be rejected")
+
+    assert calls == []
+
+
+def test_unknown_dependency_is_rejected_before_handlers_run():
+    planner = DependencyPlanner()
+    planner.tasks["architecture"].dependencies = ["missing_task"]
+
+    calls = []
+    handlers = {
+        task_id: (lambda tid=task_id: calls.append(tid))
+        for task_id in planner.tasks
+    }
+
+    try:
+        planner.execute(handlers)
+    except ValueError as exc:
+        assert "missing_task" in str(exc)
+    else:
+        raise AssertionError("Expected unknown dependency to be rejected")
+
+    assert calls == []
+
+
+def test_self_dependency_is_rejected_before_handlers_run():
+    planner = DependencyPlanner()
+    planner.tasks["requirements"].dependencies = ["requirements"]
+
+    calls = []
+    handlers = {
+        task_id: (lambda tid=task_id: calls.append(tid))
+        for task_id in planner.tasks
+    }
+
+    try:
+        planner.execute(handlers)
+    except ValueError as exc:
+        assert "cycle" in str(exc).lower()
+    else:
+        raise AssertionError("Expected self-dependency to be rejected")
+
+    assert calls == []
