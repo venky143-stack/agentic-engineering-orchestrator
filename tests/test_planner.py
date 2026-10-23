@@ -361,3 +361,43 @@ def test_zero_retries_runs_failed_task_once_without_retry_event():
     )
 
 
+def test_missing_handler_preserves_existing_task_state():
+    planner = DependencyPlanner()
+    handlers = _successful_handlers(planner)
+
+    # Establish existing state to verify validation doesn't reset it.
+    task = planner.tasks["requirements"]
+    task.status = "success"
+    task.attempts = 2
+    task.error = None
+    task.duration_ms = 12.5
+
+    del handlers["repository"]
+    calls = []
+
+    for task_id in handlers:
+        original_handler = handlers[task_id]
+
+        def tracking_handler(
+            handler=original_handler,
+            tid=task_id,
+        ):
+            calls.append(tid)
+            return handler()
+
+        handlers[task_id] = tracking_handler
+
+    try:
+        planner.execute(handlers)
+    except ValueError as exc:
+        assert "repository" in str(exc)
+    else:
+        raise AssertionError("Expected missing handler to raise ValueError")
+
+    assert calls == []
+    assert task.status == "success"
+    assert task.attempts == 2
+    assert task.error is None
+    assert task.duration_ms == 12.5
+
+
