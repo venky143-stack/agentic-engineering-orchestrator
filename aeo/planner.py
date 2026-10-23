@@ -61,6 +61,46 @@ class DependencyPlanner:
             ),
         }
 
+    def _validate_graph(self) -> None:
+        """Reject unknown dependencies and cycles before task execution."""
+        # Validate references first so cycle detection cannot encounter
+        # a missing task ID and raise an unhelpful KeyError.
+        for task in self.tasks.values():
+            unknown = sorted(set(task.dependencies) - set(self.tasks))
+            if unknown:
+                raise ValueError(
+                    f"Task '{task.task_id}' has unknown dependencies: "
+                    f"{', '.join(unknown)}"
+                )
+
+        visiting: set[str] = set()
+        visited: set[str] = set()
+        path: list[str] = []
+
+        def visit(task_id: str) -> None:
+            if task_id in visiting:
+                cycle_start = path.index(task_id)
+                cycle = path[cycle_start:] + [task_id]
+                raise ValueError(
+                    "Dependency cycle detected: " + " -> ".join(cycle)
+                )
+
+            if task_id in visited:
+                return
+
+            visiting.add(task_id)
+            path.append(task_id)
+
+            for dependency in self.tasks[task_id].dependencies:
+                visit(dependency)
+
+            path.pop()
+            visiting.remove(task_id)
+            visited.add(task_id)
+
+        for task_id in self.tasks:
+            visit(task_id)
+
     def execute(
         self, handlers: dict[str, Callable[[], object]]
     ) -> tuple[dict[str, object], list[dict]]:
@@ -73,6 +113,16 @@ class DependencyPlanner:
             raise ValueError(
                 f"Missing handlers for tasks: {', '.join(missing_handlers)}"
             )
+
+        # Validate the entire DAG before changing state or running handlers.
+        self._validate_graph()
+
+        # Reset runtime state so each execute() call is a fresh run.
+        for task in self.tasks.values():
+            task.status = "pending"
+            task.attempts = 0
+            task.error = None
+            task.duration_ms = None
 
         while any(
             task.status not in {"success", "failed", "blocked"}

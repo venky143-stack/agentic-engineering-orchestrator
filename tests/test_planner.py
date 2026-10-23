@@ -192,3 +192,212 @@ def test_negative_retry_count_is_rejected():
         assert "max_retries" in str(exc)
     else:
         raise AssertionError("Expected negative retries to raise ValueError")
+
+
+def test_dependency_cycle_is_rejected_before_handlers_run():
+    planner = DependencyPlanner()
+    planner.tasks["requirements"].dependencies = ["architecture"]
+
+    calls = []
+    handlers = {
+        task_id: (lambda tid=task_id: calls.append(tid))
+        for task_id in planner.tasks
+    }
+
+    try:
+        planner.execute(handlers)
+    except ValueError as exc:
+        assert "cycle" in str(exc).lower()
+    else:
+        raise AssertionError("Expected dependency cycle to be rejected")
+
+    assert calls == []
+
+
+def test_unknown_dependency_is_rejected_before_handlers_run():
+    planner = DependencyPlanner()
+    planner.tasks["architecture"].dependencies = ["missing_task"]
+
+    calls = []
+    handlers = {
+        task_id: (lambda tid=task_id: calls.append(tid))
+        for task_id in planner.tasks
+    }
+
+    try:
+        planner.execute(handlers)
+    except ValueError as exc:
+        assert "missing_task" in str(exc)
+    else:
+        raise AssertionError("Expected unknown dependency to be rejected")
+
+    assert calls == []
+
+
+def test_self_dependency_is_rejected_before_handlers_run():
+    planner = DependencyPlanner()
+    planner.tasks["requirements"].dependencies = ["requirements"]
+
+    calls = []
+    handlers = {
+        task_id: (lambda tid=task_id: calls.append(tid))
+        for task_id in planner.tasks
+    }
+
+    try:
+        planner.execute(handlers)
+    except ValueError as exc:
+        assert "cycle" in str(exc).lower()
+    else:
+        raise AssertionError("Expected self-dependency to be rejected")
+
+    assert calls == []
+
+def test_execute_can_be_reused_for_a_fresh_run():
+    planner = DependencyPlanner()
+    calls = []
+
+    handlers = {
+        task_id: (lambda tid=task_id: calls.append(tid) or tid)
+        for task_id in planner.tasks
+    }
+
+    first_results, first_trace = planner.execute(handlers)
+
+    assert set(first_results) == set(planner.tasks)
+    assert len(calls) == len(planner.tasks)
+    assert {
+        event["task"]
+        for event in first_trace
+        if event["event"] == "success"
+    } == set(planner.tasks)
+
+    second_results, second_trace = planner.execute(handlers)
+
+    assert set(second_results) == set(planner.tasks)
+    assert len(calls) == 2 * len(planner.tasks)
+    assert {
+        event["task"]
+        for event in second_trace
+        if event["event"] == "success"
+    } == set(planner.tasks)
+
+def test_execute_recovers_after_failed_run():
+    planner = DependencyPlanner()
+    attempts = {}
+    fail_requirements = True
+
+    handlers = {}
+
+    for task_id in planner.tasks:
+        def handler(tid=task_id):
+            attempts[tid] = attempts.get(tid, 0) + 1
+
+            if tid == "requirements" and fail_requirements:
+                raise RuntimeError("simulated first-run failure")
+
+            return tid
+
+        handlers[task_id] = handler
+
+    first_results, first_trace = planner.execute(handlers)
+
+    assert "requirements" not in first_results
+    assert planner.tasks["requirements"].status == "failed"
+    assert any(
+        event["event"] == "blocked"
+        for event in first_trace
+    )
+
+    fail_requirements = False
+
+    second_results, second_trace = planner.execute(handlers)
+
+    assert set(second_results) == set(planner.tasks)
+    assert {
+        event["task"]
+        for event in second_trace
+        if event["event"] == "success"
+    } == set(planner.tasks)
+
+    assert all(
+        task.status == "success"
+        for task in planner.tasks.values()
+    )
+
+
+def test_zero_retries_runs_failed_task_once_without_retry_event():
+    planner = DependencyPlanner(max_retries=0)
+    calls = {"requirements": 0}
+
+    def always_fails():
+        calls["requirements"] += 1
+        raise RuntimeError("failure with retries disabled")
+
+    handlers = _successful_handlers(planner)
+    handlers["requirements"] = always_fails
+
+    results, trace = planner.execute(handlers)
+
+    task = planner.tasks["requirements"]
+
+    assert "requirements" not in results
+    assert calls["requirements"] == 1
+    assert task.attempts == 1
+    assert task.status == "failed"
+    assert "failure with retries disabled" in task.error
+
+    assert not any(
+        event["event"] == "retry"
+        and event["task"] == "requirements"
+        for event in trace
+    )
+
+    assert any(
+        event["event"] == "failure"
+        and event["task"] == "requirements"
+        and event["attempt"] == 1
+        for event in trace
+    )
+
+
+def test_missing_handler_preserves_existing_task_state():
+    planner = DependencyPlanner()
+    handlers = _successful_handlers(planner)
+
+    # Establish existing state to verify validation doesn't reset it.
+    task = planner.tasks["requirements"]
+    task.status = "success"
+    task.attempts = 2
+    task.error = None
+    task.duration_ms = 12.5
+
+    del handlers["repository"]
+    calls = []
+
+    for task_id in handlers:
+        original_handler = handlers[task_id]
+
+        def tracking_handler(
+            handler=original_handler,
+            tid=task_id,
+        ):
+            calls.append(tid)
+            return handler()
+
+        handlers[task_id] = tracking_handler
+
+    try:
+        planner.execute(handlers)
+    except ValueError as exc:
+        assert "repository" in str(exc)
+    else:
+        raise AssertionError("Expected missing handler to raise ValueError")
+
+    assert calls == []
+    assert task.status == "success"
+    assert task.attempts == 2
+    assert task.error is None
+    assert task.duration_ms == 12.5
+
+
