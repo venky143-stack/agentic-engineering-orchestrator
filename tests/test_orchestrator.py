@@ -240,3 +240,45 @@ def test_output_inside_generated_directory_is_allowed():
 
     assert report["status"] == "awaiting_human_review"
     assert (output / "execution_report.json").is_file()
+
+def test_artifact_target_rejects_parent_traversal(tmp_path):
+    output = tmp_path / "bundle"
+    output.mkdir()
+
+    outside = tmp_path / "outside.txt"
+
+    try:
+        orchestrator._artifact_target(output, "../outside.txt")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("Parent traversal should be rejected")
+
+    assert not outside.exists()
+
+
+def test_artifact_target_rejects_absolute_path_outside_output(tmp_path):
+    output = tmp_path / "bundle"
+    output.mkdir()
+    outside = tmp_path / "outside.txt"
+
+    try:
+        orchestrator._artifact_target(output, str(outside))
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("Absolute paths outside output should be rejected")
+
+    assert not outside.exists()
+
+
+def test_artifact_target_allows_nested_path(tmp_path):
+    output = tmp_path / "bundle"
+
+    target = orchestrator._artifact_target(
+        output,
+        "service/app.py",
+    )
+
+    assert target == (output / "service" / "app.py").resolve()
+    assert target.is_relative_to(output.resolve())

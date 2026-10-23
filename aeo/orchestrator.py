@@ -26,6 +26,17 @@ def _is_within(path: Path, parent: Path) -> bool:
     return path == parent or parent in path.parents
 
 
+def _artifact_target(output: Path, name: str) -> Path:
+    """Resolve an artifact path and reject destinations outside output."""
+    output = output.resolve()
+    target = (output / name).resolve()
+
+    if target == output or not _is_within(target, output):
+        raise ValueError(f"Unsafe artifact path: {name}")
+
+    return target
+
+
 def _validate_output_path(output: Path, repository: Path) -> None:
     """Reject output paths that could overwrite repository source files."""
     output = output.resolve()
@@ -100,7 +111,7 @@ def run_assessment(
     for task_id, result in results.items():
         if hasattr(result, "artifacts"):
             for name, content in result.artifacts.items():
-                target = output / name
+                target = _artifact_target(output, name)
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_text(content, encoding="utf-8")
                 artifacts[name] = str(target.relative_to(output))
@@ -109,7 +120,7 @@ def run_assessment(
             result, dict
         ):
             for name, source in result.items():
-                target = output / name
+                target = _artifact_target(output, name)
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(source, target)
                 artifacts[name] = str(target.relative_to(output))
